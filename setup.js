@@ -111,7 +111,7 @@ const ask = (q) => new Promise((resolve) => {
     '# Dibuat oleh setup.js. Jangan dibagikan atau di-commit.',
     '# Folder yang menyimpan semua file pengguna (satu subfolder per akun)',
     `STORAGE_ROOT=${folder}`,
-    '# Hanya didengarkan lokal; tunnel (cloudflared/tailscale) yang menjangkaunya',
+    '# Hanya didengarkan lokal; reverse tunnel yang menjangkaunya',
     `AGENT_HOST=${cur.AGENT_HOST || '127.0.0.1'}`,
     `AGENT_PORT=${port}`,
     '# Rahasia bersama dengan web di Coolify (harus sama persis dengan AGENT_TOKEN di sana)',
@@ -132,6 +132,6 @@ const ask = (q) => new Promise((resolve) => {
   console.log('Isi di Coolify (Environment Variables):');
   console.log(`  AGENT_TOKEN=${token}`);
   console.log('  AGENT_URL=<alamat tunnel ke http://127.0.0.1:' + port + '>\n');
-  console.log('Lalu jalankan agent\\start-agent.bat (restart bila sudah berjalan).');
+  console.log('Lalu jalankan start-agent.bat (restart bila sudah berjalan).');
   rl.close();
 })();

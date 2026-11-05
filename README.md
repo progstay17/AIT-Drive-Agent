@@ -1,87 +1,200 @@
-# AIT Drive Agent
+﻿# AIT Drive Agent
 
-Standalone storage service for AIT Drive. This repository runs on the Windows PC that owns the files; the AIT Drive web gateway runs separately (for example, in Coolify).
+[![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/) [![License](https://img.shields.io/badge/license-proprietary-lightgrey)](#license)
 
-## Security model
+**AIT Drive Agent** adalah layanan penyimpanan yang berjalan di PC pemilik file. Agent menyediakan API HTTP lokal untuk membaca, mengunggah, mengunduh, memindahkan, dan menghapus file. Aplikasi web AIT Drive berjalan terpisah—misalnya di Coolify—dan bertanggung jawab atas login, akun, kuota, izin, serta antarmuka pengguna.
 
-- The agent binds to `127.0.0.1:4001` by default. **Do not change this to `0.0.0.0` for a public deployment.**
-- Publish it through an outbound HTTPS tunnel. The current AIT Drive deployment uses Caddy Panel SSH reverse tunneling; Cloudflare Tunnel remains an alternative. No router port-forwarding or inbound Windows Firewall rule is needed.
-- Every API route except `/health` requires `Authorization: Bearer <AGENT_TOKEN>`. The gateway alone holds this token; never put it in browser code or a public repository.
-- The public agent hostname is a separate origin from the web app, e.g. `https://pc-agent.example.com`. The gateway's `AGENT_URL` points to that hostname.
-- Keep `agent.env`, credentials, tunnel credentials, and storage out of Git.
+> Agent bukan aplikasi web untuk pengguna akhir. Jangan membuka port Agent langsung ke internet.
 
-## Requirements
+## Arsitektur singkat
 
-- Node.js 20+
-- Windows 10/11 or Linux
-- A persistent storage folder with enough disk space
-- For a stable public HTTPS hostname: Caddy Panel on a VPS or a domain managed in Cloudflare
-
-## Windows setup
-
-1. Clone this repository to `C:\AIT-Drive-Agent` (or another non-storage folder).
-2. Run `npm ci`.
-3. Run `setup-agent.bat`, choose the existing AIT Drive storage directory, and retain the current `AGENT_TOKEN` when migrating an existing installation. Do not create a new storage root if it would hide the existing user files.
-4. Confirm `agent.env` contains `AGENT_HOST=127.0.0.1`, `AGENT_PORT=4001`, the correct `STORAGE_ROOT`, and the same `AGENT_TOKEN` configured in the web gateway.
-5. Start with `start-agent.bat`. Local health check: `curl http://127.0.0.1:4001/health`.
-
-## Publish with Caddy Panel SSH reverse tunnel (current deployment)
-
-1. Keep `AGENT_HOST=127.0.0.1` and `AGENT_PORT=4001` in `agent.env`.
-2. In Caddy Panel, create an SSH reverse-tunnel client that listens on VPS `127.0.0.1:8081` and forwards to PC `127.0.0.1:4001`.
-3. Configure the Caddy Panel site to reverse-proxy to `127.0.0.1:8081` and enable HTTPS.
-4. Use `run-tunnel.ps1.example` as a template for the reconnect loop. Keep the actual `run-tunnel.ps1` and private SSH key local.
-5. Set the gateway `AGENT_URL` to the public HTTPS hostname and keep `AGENT_TOKEN` identical on both sides.
-
-## Publish with Cloudflare Tunnel
-
-The public hostname must be on a domain/zone you control in Cloudflare. The `sslip.io` hostname used by the web app is not a Cloudflare-managed DNS zone, so it cannot be used as a named-tunnel hostname unless you separately control that DNS zone.
-
-1. Install `cloudflared` on the storage PC.
-2. Run `cloudflared tunnel login` and authorize the Cloudflare account that manages your domain.
-3. Create a named tunnel: `cloudflared tunnel create ait-drive-agent`.
-4. Create a DNS route such as `pc-agent.your-domain.com` for that tunnel: `cloudflared tunnel route dns ait-drive-agent pc-agent.your-domain.com`.
-5. Create `%USERPROFILE%\.cloudflared\config.yml`:
-
-```yaml
-tunnel: <TUNNEL-UUID>
-credentials-file: C:\Users\<WINDOWS-USER>\.cloudflared\<TUNNEL-UUID>.json
-ingress:
-  - hostname: pc-agent.your-domain.com
-    service: http://127.0.0.1:4001
-  - service: http_status:404
+```text
+Browser
+   │ HTTPS
+   ▼
+AIT Drive Web Gateway (Coolify)
+   │ HTTPS + Authorization: Bearer <AGENT_TOKEN>
+   │ + identitas, kuota, dan izin per request
+   ▼
+Public Agent hostname / Caddy reverse proxy
+   │ VPS loopback :8081
+   │ SSH reverse tunnel
+   ▼
+Windows PC — 127.0.0.1:4001
+   │
+   ▼
+STORAGE_ROOT/
 ```
 
-6. Install/run the tunnel as a Windows service using the documented `cloudflared service install` flow for the installed cloudflared version. Keep the tunnel credentials file private.
-7. From a device outside the home network, request `https://pc-agent.your-domain.com/list` without a token. Expected result: HTTP 401. This proves the public route reaches the agent and the API is still protected.
-8. Set the web gateway's `AGENT_URL=https://pc-agent.your-domain.com` and `AGENT_TOKEN` to the exact same secret in `agent.env`, then redeploy the gateway.
+- **Agent (repo ini):** API file dan penyimpanan di PC.
+- **Web Gateway:** autentikasi pengguna, sesi, akun, kuota, izin, share link, dan UI. Dideploy terpisah dari repo AIT Drive.
+- **Tunnel/proxy:** menyediakan jalur HTTPS dari gateway ke Agent tanpa membuka port masuk pada router atau Windows PC.
+- Token Agent hanya berada di environment gateway dan `agent.env` pada PC. Token tidak boleh dikirim ke browser.
 
-Do not expose port 4001 directly to the internet. Do not use a Cloudflare Quick Tunnel as a permanent production endpoint; its hostname is temporary.
+Detail: [Architecture](docs/ARCHITECTURE.md), [API](docs/API.md), [Security](docs/SECURITY.md).
 
-## Configuration (`agent.env`)
+## Fitur Agent
 
-```dotenv
-STORAGE_ROOT=C:\AIT-Drive-Storage
-AGENT_HOST=127.0.0.1
-AGENT_PORT=4001
-AGENT_TOKEN=<random-secret-at-least-32-bytes>
-```
+- Penyimpanan multi-akun: direktori terpisah di `STORAGE_ROOT/users/<id>`.
+- Operasi file: list, search, upload streaming, download, buat folder, rename, move, soft-delete, dan empty trash.
+- Kuota per akun ditegakkan di Agent menggunakan nilai yang dikirim gateway.
+- Izin upload, modify, delete, dan share diteruskan gateway pada setiap request.
+- File yang dihapus dipindahkan ke `.trash`; ukuran trash tetap dihitung dalam kuota sampai dikosongkan.
+- Data akun yang diarsipkan dipindahkan ke `.ait/archive` dan tidak dihapus otomatis.
+- Pemeriksaan path untuk mencegah path traversal dan akses keluar dari folder akun.
+- Health endpoint `/health` untuk monitoring koneksi.
 
-Generate a token locally with:
+## Persyaratan
+
+- Node.js 20 atau lebih baru.
+- Windows 10/11 atau Windows Server (panduan utama di bawah memakai PowerShell); Linux dapat menjalankan Agent dengan environment variable yang sama.
+- Akses tulis ke folder penyimpanan.
+- Tunnel HTTPS yang dikonfigurasi secara terpisah. Deployment AIT saat ini menggunakan SSH reverse tunnel dari Caddy Panel.
+
+## Instalasi Windows
+
+1. Clone repo ini ke folder aplikasi, misalnya `C:\AIT-Drive-Agent`. Jangan letakkan kode aplikasi di dalam `STORAGE_ROOT`.
+2. Buka PowerShell pada folder tersebut, lalu jalankan:
+
+   ```powershell
+   npm ci
+   .\setup-agent.bat
+   ```
+
+3. Pada setup, pilih folder data yang memang akan menjadi penyimpanan AIT Drive. Jika memindahkan instalasi lama, gunakan kembali folder `STORAGE_ROOT` lama. **Jangan pilih folder kosong baru jika file lama masih berada di lokasi sebelumnya.**
+4. Setup membuat `agent.env` dan token acak jika belum ada. Pertahankan token yang sudah dipakai gateway; menggantinya hanya di satu sisi akan memutus koneksi.
+5. Jalankan Agent:
+
+   ```powershell
+   .\start-agent.bat
+   ```
+
+6. Di PowerShell lain, periksa:
+
+   ```powershell
+   Test-NetConnection 127.0.0.1 -Port 4001
+   Invoke-RestMethod http://127.0.0.1:4001/health
+   ```
+
+   Hasil health yang benar adalah `{ ok: true }`.
+
+Untuk instalasi otomatis tanpa jendela pemilihan folder, jalankan `node setup.js --no-gui` dan ikuti prompt. Lihat [Windows Operations](docs/WINDOWS.md).
+
+## Konfigurasi
+
+File `agent.env` dibuat secara lokal oleh setup dan **tidak boleh di-commit**. Template publik tersedia di [`agent.env.example`](agent.env.example).
+
+| Variabel | Default | Keterangan |
+|---|---|---|
+| `STORAGE_ROOT` | `../storage` | Root semua file pengguna. Jaga agar tetap pada disk penyimpanan yang benar. |
+| `AGENT_HOST` | `127.0.0.1` | Alamat bind HTTP. Pertahankan loopback jika menggunakan tunnel pada host yang sama. |
+| `AGENT_PORT` | `4001` | Port HTTP lokal Agent. |
+| `AGENT_TOKEN` | wajib | Shared secret gateway ↔ Agent; minimal 24 karakter. Gunakan random secret panjang. |
+| `TUNNEL_PROVIDER` | `none` | `none`, `cloudflare`, atau `chisel` untuk tunnel yang dikelola Agent. |
+| `CLOUDFLARED_PATH` | `cloudflared` | Path executable Cloudflare Tunnel jika provider `cloudflare`. |
+| `CLOUDFLARED_TUNNEL_TOKEN` | — | Token tunnel Cloudflare. Rahasia. |
+| `CHISEL_PATH` | `chisel` | Path executable Chisel jika provider `chisel`. |
+| `CHISEL_SERVER` | — | URL `http(s)` server Chisel. |
+| `CHISEL_AUTH` | — | Kredensial Chisel khusus `username:password`. Rahasia. |
+| `CHISEL_REMOTE_PORT` | `14001` | Port reverse listener pada server Chisel. |
+
+Generate token baru secara lokal:
 
 ```powershell
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-The token is a shared secret between the gateway and agent. Rotate it on both sides together.
+Lalu pasang nilai yang sama sebagai `AGENT_TOKEN` di `agent.env` dan environment variable gateway di Coolify. Jangan menempelkan token ke issue, chat publik, screenshot, atau source code.
 
-## API
+## Koneksi tunnel AIT saat ini: Caddy Panel + SSH reverse tunnel
 
-The agent is a storage API, not a user-facing website. `/health` returns a minimal health response; all other routes require the bearer token and the gateway-supplied user identity/permissions. See the AIT-Drive repository's `docs/API.md` and `docs/ARCHITECTURE.md` for the gateway contract.
+Pada deployment yang sudah disiapkan, Agent berjalan di PC pada `127.0.0.1:4001`, SSH reverse tunnel membuka listener **VPS loopback** `127.0.0.1:8081`, dan Caddy Panel mem-proxy hostname HTTPS publik ke listener tersebut.
 
-## Existing installation migration
+1. Pastikan `/health` pada PC lokal mengembalikan `ok: true`.
+2. Di Caddy Panel, buat SSH tunnel dengan remote/listen address `127.0.0.1:8081` dan tujuan lokal PC `127.0.0.1:4001`.
+3. Simpan private key SSH hanya di PC. Public key pada VPS dibatasi ke listener `127.0.0.1:8081`.
+4. Jalankan loop reconnect dari template [`run-tunnel.ps1.example`](run-tunnel.ps1.example). Salin menjadi `run-tunnel.ps1` secara lokal, lalu isi host dan user VPS. File aktual itu di-ignore Git.
+5. Pada Caddy Panel, arahkan site HTTPS Agent ke upstream `127.0.0.1:8081`.
+6. Dari PC, uji `Invoke-RestMethod https://<hostname-agent>/health`. Hasil harus `{ ok: true }`.
+7. Uji endpoint terlindungi tanpa token, misalnya `/list`. Hasil yang diharapkan HTTP `401`.
+8. Atur `AGENT_URL` pada gateway Coolify ke hostname HTTPS Agent dan samakan `AGENT_TOKEN` pada kedua sisi.
 
-- Stop the old `C:\cloud-drive\agent\start-agent.bat` process/task before starting this copy on port 4001.
-- Preserve the existing `STORAGE_ROOT` and `AGENT_TOKEN`; never move or delete the storage folder during code migration.
-- Verify the local `/health` endpoint, then verify the public tunnel returns 401 without a token and the AIT Drive UI reports the PC online.
-- The main AIT-Drive repository currently retains a mirrored `agent/` directory for its integrated API test harness. Keep the standalone copy in sync when updating the Agent.
+`TUNNEL_PROVIDER=none` untuk arsitektur ini karena SSH tunnel dikelola Caddy Panel/PowerShell, bukan tunnel manager di dalam proses Node Agent. Panduan rinci: [Tunnel Deployment](docs/TUNNEL.md).
+
+## Tunnel alternatif
+
+Agent juga memiliki tunnel manager opsional:
+
+- **Cloudflare Tunnel:** set `TUNNEL_PROVIDER=cloudflare` dan `CLOUDFLARED_TUNNEL_TOKEN`. Public hostname harus berasal dari DNS zone yang dikelola akun Cloudflare kamu.
+- **Chisel:** set `TUNNEL_PROVIDER=chisel`, `CHISEL_SERVER`, dan `CHISEL_AUTH`. Gunakan hanya server Chisel yang kamu kendalikan dan HTTPS.
+
+Jangan menjalankan dua tunnel yang mencoba mengambil alih port/hostname yang sama. Jangan gunakan Chisel jika executable atau arsip yang diunduh ditandai antivirus; jangan mematikan antivirus atau membuat pengecualian untuk memaksa instalasi.
+
+## API dan integrasi gateway
+
+Semua endpoint selain `/health` membutuhkan header:
+
+```http
+Authorization: Bearer <AGENT_TOKEN>
+```
+
+Endpoint file juga membutuhkan header identitas gateway:
+
+```http
+X-AIT-User: user-id
+X-AIT-Quota: <bytes-or-empty>
+X-AIT-Perms: upload,modify,delete,share
+```
+
+Gateway harus memvalidasi pengguna dan hak akses sebelum meneruskan request. Agent tidak menyediakan login pengguna dan tidak boleh diakses langsung oleh browser. Daftar route, payload, respons, dan contoh `curl` ada di [API Reference](docs/API.md).
+
+## Operasional dan backup
+
+- Pastikan PC penyimpanan selalu menyala dan tidak masuk sleep ketika layanan dibutuhkan.
+- Jalankan Agent dan tunnel saat user login menggunakan Windows Task Scheduler atau service manager yang dikelola administrator.
+- Pantau `/health`, koneksi HTTPS publik, status task, ruang disk, dan log proses.
+- Backup **seluruh `STORAGE_ROOT`** secara terjadwal ke media terpisah. Backup volume `/data` gateway juga diperlukan untuk akun, kuota, izin, dan konfigurasi web.
+- Uji pemulihan backup sebelum mengandalkannya. Soft-delete bukan backup.
+- Jangan menghapus, memindahkan, atau mengubah struktur `STORAGE_ROOT` saat Agent aktif.
+
+Panduan: [Windows Operations](docs/WINDOWS.md), [Troubleshooting](docs/TROUBLESHOOTING.md).
+
+## Struktur repository
+
+```text
+AIT-Drive-Agent/
+├── server.js                  # HTTP storage API
+├── setup.js                   # setup interaktif + agent.env generator
+├── setup-agent.bat            # setup launcher Windows
+├── start-agent.bat            # launcher Windows
+├── run-agent.ps1              # PowerShell launcher untuk Task Scheduler
+├── run-tunnel.ps1.example     # template tunnel SSH; tanpa data host pribadi
+├── tunnel/
+│   └── manager.js             # Cloudflare/Chisel optional tunnel manager
+├── docs/                      # API, architecture, security, deployment, operations
+├── agent.env.example          # template tanpa secret
+├── package.json
+└── package-lock.json
+```
+
+## Pengembangan dan pemeriksaan
+
+```bash
+npm ci
+npm run check
+```
+
+`npm run check` memeriksa sintaks `server.js`. Pengujian integrasi Agent dilakukan bersama test harness AIT Drive; lihat instruksi pada repo AIT Drive.
+
+## Dokumen
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [API Reference](docs/API.md)
+- [Security](docs/SECURITY.md)
+- [Tunnel Deployment](docs/TUNNEL.md)
+- [Windows Operations](docs/WINDOWS.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+
+## License
+
+Source code repository ini dipublikasikan untuk kebutuhan proyek AIT Drive. Hak penggunaan, distribusi, dan modifikasi mengikuti ketentuan yang ditetapkan pemilik repository. Belum ada lisensi open-source yang diberikan.
