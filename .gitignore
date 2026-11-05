@@ -1,0 +1,6 @@
+﻿# Secrets and local runtime data
+agent.env
+.env
+*.log
+node_modules/
+storage/
