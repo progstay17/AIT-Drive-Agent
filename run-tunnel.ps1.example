@@ -1,0 +1,27 @@
+﻿# Copy this file to run-tunnel.ps1 and edit the VPS settings below.
+$ErrorActionPreference = 'Stop'
+$sshHost = 'YOUR_VPS_HOST_OR_IP'
+$sshUser = 'YOUR_VPS_SSH_USER'
+$remotePort = 8081
+$agentPort = 4001
+$keyPath = Join-Path $env:USERPROFILE '.ssh\tunnel_ait-drive-agent'
+$sshExe = Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'
+
+if ($sshHost -eq 'YOUR_VPS_HOST_OR_IP' -or $sshUser -eq 'YOUR_VPS_SSH_USER') {
+    throw 'Edit $sshHost and $sshUser in run-tunnel.ps1 before starting the tunnel.'
+}
+if (-not (Test-Path $keyPath)) { throw "SSH private key not found: $keyPath" }
+
+while ($true) {
+    & $sshExe -N -i $keyPath `
+        -o IdentitiesOnly=yes `
+        -o BatchMode=yes `
+        -o ServerAliveInterval=30 `
+        -o ServerAliveCountMax=3 `
+        -o ExitOnForwardFailure=yes `
+        -o StrictHostKeyChecking=accept-new `
+        -p 22 `
+        -R "127.0.0.1:$remotePort`:127.0.0.1:$agentPort" `
+        "$sshUser@$sshHost"
+    Start-Sleep -Seconds 10
+}

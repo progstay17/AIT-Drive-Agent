@@ -1,6 +1,8 @@
 ﻿# Secrets and local runtime data
 agent.env
+agent.env.bak-*
 .env
 *.log
 node_modules/
 storage/
+run-tunnel.ps1

@@ -145,6 +145,7 @@ app.use((req, res, next) => {
 // ---------- system endpoints (gateway only: bearer token, no user identity) ----------
 const validId = (id) => id === OWNER_ID || USER_RE.test(String(id));
 app.get('/sys/disk', wrap(async (req, res) => res.json(await disk())));
+app.get('/sys/tunnel', (req, res) => res.json(require('./tunnel/manager').getStatus()));
 
 app.post('/sys/usage', wrap(async (req, res) => {
   const ids = Array.isArray((req.body || {}).ids) ? req.body.ids.slice(0, 1000) : [];
@@ -419,6 +420,18 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: status === 500 ? 'internal error' : err.message });
 });
 
-app.listen(PORT, HOST, () => {
+const tunnel = require('./tunnel/manager');
+
+const httpServer = app.listen(PORT, HOST, () => {
   console.log(`Agent listening on http://${HOST}:${PORT}  root=${ROOT}`);
+  tunnel.start().catch((err) => console.error(`Tunnel startup failed: ${err.message}`));
 });
+
+async function shutdown(signal) {
+  console.log(`Received ${signal}; stopping agent and tunnel...`);
+  await tunnel.stop().catch(() => {});
+  httpServer.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 7000).unref();
+}
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));

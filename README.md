@@ -1,11 +1,11 @@
-﻿# AIT Drive Agent
+# AIT Drive Agent
 
 Standalone storage service for AIT Drive. This repository runs on the Windows PC that owns the files; the AIT Drive web gateway runs separately (for example, in Coolify).
 
 ## Security model
 
 - The agent binds to `127.0.0.1:4001` by default. **Do not change this to `0.0.0.0` for a public deployment.**
-- Publish it through an outbound HTTPS tunnel (Cloudflare Tunnel is the recommended option). No router port-forwarding or inbound Windows Firewall rule is needed.
+- Publish it through an outbound HTTPS tunnel. The current AIT Drive deployment uses Caddy Panel SSH reverse tunneling; Cloudflare Tunnel remains an alternative. No router port-forwarding or inbound Windows Firewall rule is needed.
 - Every API route except `/health` requires `Authorization: Bearer <AGENT_TOKEN>`. The gateway alone holds this token; never put it in browser code or a public repository.
 - The public agent hostname is a separate origin from the web app, e.g. `https://pc-agent.example.com`. The gateway's `AGENT_URL` points to that hostname.
 - Keep `agent.env`, credentials, tunnel credentials, and storage out of Git.
@@ -15,7 +15,7 @@ Standalone storage service for AIT Drive. This repository runs on the Windows PC
 - Node.js 20+
 - Windows 10/11 or Linux
 - A persistent storage folder with enough disk space
-- For a stable public HTTPS hostname: a domain managed in Cloudflare and a Cloudflare Tunnel
+- For a stable public HTTPS hostname: Caddy Panel on a VPS or a domain managed in Cloudflare
 
 ## Windows setup
 
@@ -24,6 +24,14 @@ Standalone storage service for AIT Drive. This repository runs on the Windows PC
 3. Run `setup-agent.bat`, choose the existing AIT Drive storage directory, and retain the current `AGENT_TOKEN` when migrating an existing installation. Do not create a new storage root if it would hide the existing user files.
 4. Confirm `agent.env` contains `AGENT_HOST=127.0.0.1`, `AGENT_PORT=4001`, the correct `STORAGE_ROOT`, and the same `AGENT_TOKEN` configured in the web gateway.
 5. Start with `start-agent.bat`. Local health check: `curl http://127.0.0.1:4001/health`.
+
+## Publish with Caddy Panel SSH reverse tunnel (current deployment)
+
+1. Keep `AGENT_HOST=127.0.0.1` and `AGENT_PORT=4001` in `agent.env`.
+2. In Caddy Panel, create an SSH reverse-tunnel client that listens on VPS `127.0.0.1:8081` and forwards to PC `127.0.0.1:4001`.
+3. Configure the Caddy Panel site to reverse-proxy to `127.0.0.1:8081` and enable HTTPS.
+4. Use `run-tunnel.ps1.example` as a template for the reconnect loop. Keep the actual `run-tunnel.ps1` and private SSH key local.
+5. Set the gateway `AGENT_URL` to the public HTTPS hostname and keep `AGENT_TOKEN` identical on both sides.
 
 ## Publish with Cloudflare Tunnel
 
@@ -76,4 +84,4 @@ The agent is a storage API, not a user-facing website. `/health` returns a minim
 - Stop the old `C:\cloud-drive\agent\start-agent.bat` process/task before starting this copy on port 4001.
 - Preserve the existing `STORAGE_ROOT` and `AGENT_TOKEN`; never move or delete the storage folder during code migration.
 - Verify the local `/health` endpoint, then verify the public tunnel returns 401 without a token and the AIT Drive UI reports the PC online.
-- Only after all checks pass should the old `agent/` directory be removed from the AIT-Drive repository.
+- The main AIT-Drive repository currently retains a mirrored `agent/` directory for its integrated API test harness. Keep the standalone copy in sync when updating the Agent.

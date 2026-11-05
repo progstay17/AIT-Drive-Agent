@@ -9,4 +9,3 @@ if not exist agent.env (
 for /f "usebackq eol=# tokens=1,* delims==" %%a in ("agent.env") do set "%%a=%%b"
 node server.js
 pause
-

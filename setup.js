@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 // Setup interaktif agent: pilih folder storage, port, dan token, lalu tulis agent.env.
 // Jalankan: agent\setup-agent.bat   (atau: node agent/setup.js [--no-gui])
 const fs = require('fs');
@@ -116,6 +116,14 @@ const ask = (q) => new Promise((resolve) => {
     `AGENT_PORT=${port}`,
     '# Rahasia bersama dengan web di Coolify (harus sama persis dengan AGENT_TOKEN di sana)',
     `AGENT_TOKEN=${token}`,
+    '# Tunnel: none | cloudflare | chisel',
+    `TUNNEL_PROVIDER=${cur.TUNNEL_PROVIDER || 'none'}`,
+    `CLOUDFLARED_PATH=${cur.CLOUDFLARED_PATH || ''}`,
+    `CLOUDFLARED_TUNNEL_TOKEN=${cur.CLOUDFLARED_TUNNEL_TOKEN || ''}`,
+    `CHISEL_PATH=${cur.CHISEL_PATH || ''}`,
+    `CHISEL_SERVER=${cur.CHISEL_SERVER || ''}`,
+    `CHISEL_AUTH=${cur.CHISEL_AUTH || ''}`,
+    `CHISEL_REMOTE_PORT=${cur.CHISEL_REMOTE_PORT || '14001'}`,
     '',
   ].join('\r\n');
   fs.writeFileSync(ENV_FILE, body);
@@ -127,4 +135,3 @@ const ask = (q) => new Promise((resolve) => {
   console.log('Lalu jalankan agent\\start-agent.bat (restart bila sudah berjalan).');
   rl.close();
 })();
-
