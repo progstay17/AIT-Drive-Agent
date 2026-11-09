@@ -84,6 +84,7 @@ async function disk() {
 async function dirSize(dir) {
   let n = 0;
   for (const e of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (path.basename(dir) === TRASH && e.name.endsWith('.ait-meta.json')) continue;
     const p = path.join(dir, e.name);
     if (e.isDirectory()) n += await dirSize(p);
     else if (e.isFile()) { try { n += (await fsp.stat(p)).size; } catch {} }
@@ -356,7 +357,7 @@ app.post('/upload', (req, res, next) => {
             await fsp.rm(tmp, { force: true }).catch(() => {});
             return resolve();
           }
-          try { await fsp.mkdir(targetDir, { recursive: true }); await fsp.rename(tmp, target); saved.push(toRel(ctx.root, target)); }
+          try { await fsp.mkdir(targetDir, { recursive: true }); await fsp.rename(tmp, target); saved.push(toRel(dir, target)); }
           catch (e) { failed = failed || e; u.used -= written; await fsp.rm(tmp, { force: true }).catch(() => {}); }
           resolve();
         });
