@@ -448,7 +448,7 @@ app.get('/trash', wrap(async (req, res) => {
 }));
 
 app.post('/trash/restore', wrap(async (req, res) => {
-  need(req.ctx, 'modify');
+  need(req.ctx, 'delete');
   const id = String((req.body || {}).id || '');
   if (!id || id.includes('/') || id.includes('\\') || id === '.' || id === '..' || id.endsWith('.ait-meta.json')) throw httpError(400, 'invalid trash id');
   const dir = path.join(req.ctx.root, TRASH);
