@@ -307,7 +307,7 @@ app.post('/upload', (req, res, next) => {
     u.uploading++;
     let ended = false;
     const end = () => { if (!ended) { ended = true; u.uploading--; } };
-    const bb = Busboy({ headers: req.headers, limits: { fileSize: 50 * 1024 * 1024 * 1024 } });
+    const bb = Busboy({ headers: req.headers, preservePath: true, limits: { fileSize: 50 * 1024 * 1024 * 1024 } });
     const saved = [];
     const pending = [];
     let failed = null;
