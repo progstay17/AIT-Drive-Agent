@@ -98,13 +98,26 @@ File `agent.env` dibuat secara lokal oleh setup dan **tidak boleh di-commit**. T
 | `CHISEL_AUTH` | — | Kredensial Chisel khusus `username:password`. Rahasia. |
 | `CHISEL_REMOTE_PORT` | `14001` | Port reverse listener pada server Chisel. |
 
+### Aturan konfigurasi untuk setiap PC storage
+
+Setiap PC yang menjalankan Agent harus memiliki file `agent.env` sendiri dan direktori `STORAGE_ROOT` sendiri. Jangan menyalin token yang sama ke beberapa PC.
+
+- **Storage PC utama:** nilai `AGENT_TOKEN` harus sama dengan environment `AGENT_TOKEN` di Gateway Coolify. URL publik Agent ini menjadi `AGENT_URL` Gateway (`primary`).
+- **Storage PC tambahan:** buat token acak baru untuk PC tersebut. Jangan mengubah `AGENT_URL` atau `AGENT_TOKEN` primary di Coolify. Daftarkan URL HTTPS dan token PC tambahan melalui Admin → Storage nodes di AIT Drive Gateway.
+- **`STORAGE_ROOT`:** tentukan folder data khusus untuk PC itu. Folder ini berisi subfolder akun; jangan gunakan folder instalasi aplikasi dan jangan arahkan dua Agent ke root yang sama.
+- **`AGENT_HOST`:** pertahankan `127.0.0.1` untuk pola reverse tunnel. Jangan bind ke `0.0.0.0` atau membuka port Agent ke internet.
+- **`AGENT_PORT`:** default `4001`; jika diubah, sesuaikan tujuan tunnel lokal dan `CHISEL_REMOTE_PORT`/mapping terkait.
+- **`TUNNEL_PROVIDER`:** gunakan `none` untuk setup AIT saat ini dengan Caddy Panel + SSH reverse tunnel PowerShell. Gunakan `cloudflare` atau `chisel` hanya jika memang memilih tunnel manager bawaan Agent; jangan menjalankan beberapa tunnel yang berebut endpoint sama.
+
+Untuk node tambahan, pastikan hostname HTTPS dapat dijangkau dari Gateway Coolify dan meneruskan ke `127.0.0.1:<AGENT_PORT>` pada PC yang tepat. Uji `/health` dari jalur publik sebelum mendaftarkan node. Token node disimpan Gateway di persistent volume `/data`; backup volume itu dengan aman.
+
 Generate token baru secara lokal:
 
 ```powershell
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-Lalu pasang nilai yang sama sebagai `AGENT_TOKEN` di `agent.env` dan environment variable gateway di Coolify. Jangan menempelkan token ke issue, chat publik, screenshot, atau source code.
+Pasang hasilnya sebagai `AGENT_TOKEN` pada `agent.env` PC yang bersangkutan. Untuk PC primary, samakan dengan `AGENT_TOKEN` di Coolify; untuk PC tambahan, masukkan token tersebut saat mendaftarkan storage node di panel admin. Jangan menempelkan token ke issue, chat publik, screenshot, atau source code.
 
 ## Koneksi tunnel AIT saat ini: Caddy Panel + SSH reverse tunnel
 
