@@ -268,8 +268,9 @@ app.get('/download', wrap(async (req, res) => {
     const zip = path.join(require('os').tmpdir(), `ait-${crypto.randomBytes(12).toString('hex')}.zip`);
     const isWin = process.platform === 'win32';
     const command = isWin ? 'powershell.exe' : 'zip';
+    const ps = `Compress-Archive -LiteralPath '${abs.replace(/'/g, "''")}' -DestinationPath '${zip.replace(/'/g, "''")}' -Force`;
     const args = isWin
-      ? ['-NoProfile', '-NonInteractive', '-Command', 'Compress-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force', abs, zip]
+      ? ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')]
       : ['-r', zip, path.basename(abs)];
     const child = spawn(command, args, { cwd: isWin ? undefined : path.dirname(abs), windowsHide: true });
     let stderr = '';
