@@ -52,7 +52,7 @@ function safeEqual(a, b) {
 function validName(name) {
   if (typeof name !== 'string') return false;
   const n = name.trim();
-  if (!n || n === '.' || n === '..') return false;
+  if (!n || n === '.' || n === '..' || n.toLowerCase() === TRASH) return false;
   if (/[\\/:*?"<>|\x00-\x1f]/.test(n)) return false;
   return n.length <= 200;
 }
@@ -120,7 +120,7 @@ function resolveSafe(root, rel) {
   const abs = path.resolve(root, clean);
   if (abs !== root && !abs.startsWith(root + path.sep)) throw httpError(400, 'invalid path');
   const first = path.relative(root, abs).split(path.sep)[0];
-  if (first === TRASH) throw httpError(400, 'invalid path');
+  if (first && first.toLowerCase() === TRASH) throw httpError(400, 'invalid path');
   return abs;
 }
 async function ensureInside(root, abs) {
@@ -326,7 +326,7 @@ app.post('/upload', (req, res, next) => {
     bb.on('file', (field, stream, info) => {
       const relName = String(info.filename || '').replace(/\\/g, '/').replace(/^\/+/, '');
       const parts = relName.split('/');
-      if (!parts.length || parts.some((part) => !validName(part) || part === TRASH)) { stream.resume(); failed = failed || httpError(400, 'invalid relative file path'); return; }
+      if (!parts.length || parts.some((part) => !validName(part) || part.toLowerCase() === TRASH)) { stream.resume(); failed = failed || httpError(400, 'invalid relative file path'); return; }
       const name = parts[parts.length - 1];
       const subdir = path.resolve(dir, ...parts.slice(0, -1));
       if (subdir !== dir && !subdir.startsWith(dir + path.sep)) { stream.resume(); failed = failed || httpError(400, 'invalid relative file path'); return; }
