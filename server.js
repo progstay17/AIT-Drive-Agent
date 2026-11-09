@@ -323,7 +323,7 @@ app.post('/upload', (req, res, next) => {
     };
 
     bb.on('file', (field, stream, info) => {
-      const relName = String(info.filename || '').replace(/\\/g, '/').replace(/^\\/+/, '');
+      const relName = String(info.filename || '').replace(/\\/g, '/').replace(/^\/+/, '');
       const parts = relName.split('/');
       if (!parts.length || parts.some((part) => !validName(part) || part === TRASH)) { stream.resume(); failed = failed || httpError(400, 'invalid relative file path'); return; }
       const name = parts[parts.length - 1];
