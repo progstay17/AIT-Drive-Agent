@@ -13,6 +13,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
 const { Transform, pipeline } = require('stream');
 
 const PORT = parseInt(process.env.AGENT_PORT || '4001', 10);
@@ -260,10 +261,28 @@ app.get('/download', wrap(async (req, res) => {
   const abs = resolveSafe(root, req.query.path);
   await ensureInside(root, abs);
   const st = await fsp.stat(abs).catch(() => null);
-  if (!st || !st.isFile()) throw httpError(404, 'file not found');
+  if (!st) throw httpError(404, 'file not found');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (st.isDirectory()) {
+    const zip = path.join(require('os').tmpdir(), `ait-${crypto.randomBytes(12).toString('hex')}.zip`);
+    const isWin = process.platform === 'win32';
+    const command = isWin ? 'powershell.exe' : 'zip';
+    const args = isWin
+      ? ['-NoProfile', '-NonInteractive', '-Command', 'Compress-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force', abs, zip]
+      : ['-r', zip, path.basename(abs)];
+    const child = spawn(command, args, { cwd: isWin ? undefined : path.dirname(abs), windowsHide: true });
+    let stderr = '';
+    child.stderr.on('data', (d) => { stderr += d.toString().slice(0, 2000); });
+    child.on('error', () => { fsp.rm(zip, { force: true }).catch(() => {}); if (!res.headersSent) res.status(501).json({ error: 'folder archive is not available on this agent' }); });
+    child.on('close', async (code) => {
+      if (code !== 0 || !fs.existsSync(zip)) { await fsp.rm(zip, { force: true }).catch(() => {}); if (!res.headersSent) res.status(500).json({ error: 'could not create folder archive' }); return; }
+      res.download(zip, `${path.basename(abs)}.zip`, async () => { await fsp.rm(zip, { force: true }).catch(() => {}); });
+    });
+    return;
+  }
+  if (!st.isFile()) throw httpError(404, 'file not found');
   const inline = req.query.inline === '1';
   res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(path.basename(abs))}`);
-  res.setHeader('X-Content-Type-Options', 'nosniff');
   res.sendFile(abs, { dotfiles: 'allow', acceptRanges: true }, (err) => {
     if (err && !res.headersSent) res.status(err.status || 500).json({ error: 'send failed' });
   });
@@ -288,7 +307,7 @@ app.post('/upload', (req, res, next) => {
     u.uploading++;
     let ended = false;
     const end = () => { if (!ended) { ended = true; u.uploading--; } };
-    const bb = Busboy({ headers: req.headers, limits: { fileSize: 50 * 1024 * 1024 * 1024 } });
+    const bb = Busboy({ headers: req.headers, preservePath: true, limits: { fileSize: 50 * 1024 * 1024 * 1024 } });
     const saved = [];
     const pending = [];
     let failed = null;
@@ -304,12 +323,18 @@ app.post('/upload', (req, res, next) => {
     };
 
     bb.on('file', (field, stream, info) => {
-      const name = path.basename(String(info.filename || '').replace(/\\/g, '/'));
-      if (!validName(name)) { stream.resume(); failed = failed || httpError(400, 'invalid file name'); return; }
-      let target = path.join(dir, name);
+      const relName = String(info.filename || '').replace(/\\/g, '/').replace(/^\/+/, '');
+      const parts = relName.split('/');
+      if (!parts.length || parts.some((part) => !validName(part) || part === TRASH)) { stream.resume(); failed = failed || httpError(400, 'invalid relative file path'); return; }
+      const name = parts[parts.length - 1];
+      const subdir = path.resolve(dir, ...parts.slice(0, -1));
+      if (subdir !== dir && !subdir.startsWith(dir + path.sep)) { stream.resume(); failed = failed || httpError(400, 'invalid relative file path'); return; }
+      let targetDir = subdir;
+      let target = path.join(targetDir, name);
       const ext = path.extname(name), base = path.basename(name, ext);
       let i = 1;
-      while (fs.existsSync(target) || fs.existsSync(target + '.part')) target = path.join(dir, `${base} (${i++})${ext}`);
+      while (fs.existsSync(target) || fs.existsSync(target + '.part')) target = path.join(targetDir, `${base} (${i++})${ext}`);
+      fs.mkdirSync(targetDir, { recursive: true });
       const tmp = target + '.part';
       const ws = fs.createWriteStream(tmp);
       let written = 0, over = false, limited = false;
@@ -331,7 +356,7 @@ app.post('/upload', (req, res, next) => {
             await fsp.rm(tmp, { force: true }).catch(() => {});
             return resolve();
           }
-          try { await fsp.rename(tmp, target); saved.push(path.basename(target)); }
+          try { await fsp.mkdir(targetDir, { recursive: true }); await fsp.rename(tmp, target); saved.push(toRel(ctx.root, target)); }
           catch (e) { failed = failed || e; u.used -= written; await fsp.rm(tmp, { force: true }).catch(() => {}); }
           resolve();
         });
@@ -398,9 +423,49 @@ app.post('/delete', wrap(async (req, res) => {
   const trashDir = path.join(ctx.root, TRASH);
   await fsp.mkdir(trashDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  await fsp.rename(abs, path.join(trashDir, `${stamp}__${path.basename(abs)}`));
+  const id = `${stamp}__${crypto.randomBytes(5).toString('hex')}__${path.basename(abs)}`;
+  const trashed = path.join(trashDir, id);
+  await fsp.rename(abs, trashed);
+  await fsp.writeFile(trashed + '.ait-meta.json', JSON.stringify({ originalPath: toRel(ctx.root, abs), deletedAt: new Date().toISOString(), name: path.basename(abs) }));
   touchUsage(ctx.id); // total stays the same, only the trash figure changes
-  res.json({ ok: true });
+  res.json({ ok: true, id });
+}));
+
+app.get('/trash', wrap(async (req, res) => {
+  const dir = path.join(req.ctx.root, TRASH);
+  const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+  const items = [];
+  for (const e of entries) {
+    if (e.name.endsWith('.ait-meta.json')) continue;
+    const abs = path.join(dir, e.name);
+    const meta = await fsp.readFile(abs + '.ait-meta.json', 'utf8').then(JSON.parse).catch(() => null);
+    const st = await fsp.stat(abs).catch(() => null);
+    if (!st) continue;
+    items.push({ id: e.name, name: meta?.name || e.name.replace(/^.*?__/, ''), originalPath: meta?.originalPath || e.name.replace(/^.*?__/, ''), deletedAt: meta?.deletedAt || null, type: st.isDirectory() ? 'dir' : 'file', size: st.isFile() ? st.size : await dirSize(abs) });
+  }
+  items.sort((a, b) => String(b.deletedAt || '').localeCompare(String(a.deletedAt || '')));
+  res.json({ items });
+}));
+
+app.post('/trash/restore', wrap(async (req, res) => {
+  need(req.ctx, 'delete');
+  const id = String((req.body || {}).id || '');
+  if (!id || id.includes('/') || id.includes('\\') || id === '.' || id === '..' || id.endsWith('.ait-meta.json')) throw httpError(400, 'invalid trash id');
+  const dir = path.join(req.ctx.root, TRASH);
+  const source = path.join(dir, id);
+  const st = await fsp.stat(source).catch(() => null);
+  if (!st) throw httpError(404, 'trash item not found');
+  const meta = await fsp.readFile(source + '.ait-meta.json', 'utf8').then(JSON.parse).catch(() => null);
+  const fallback = id.replace(/^.*?__/, '');
+  const rel = meta?.originalPath || fallback;
+  const target = resolveSafe(req.ctx.root, rel);
+  await ensureInside(req.ctx.root, path.dirname(target));
+  await fsp.mkdir(path.dirname(target), { recursive: true });
+  if (fs.existsSync(target)) throw httpError(409, 'original location already contains an item');
+  await fsp.rename(source, target);
+  await fsp.rm(source + '.ait-meta.json', { force: true });
+  touchUsage(req.ctx.id);
+  res.json({ ok: true, path: toRel(req.ctx.root, target) });
 }));
 
 app.post('/trash/empty', wrap(async (req, res) => {
