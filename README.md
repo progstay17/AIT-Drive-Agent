@@ -36,10 +36,10 @@ Detail: [Architecture](docs/ARCHITECTURE.md), [API](docs/API.md), [Security](doc
 ## Fitur Agent
 
 - Penyimpanan multi-akun: direktori terpisah di `STORAGE_ROOT/users/<id>`.
-- Operasi file: list, search, upload streaming, download, buat folder, rename, move, soft-delete, dan empty trash.
+- Operasi file: list, search, upload streaming, upload folder bertingkat, download file/folder ZIP, buat folder, rename, move, soft-delete, lihat Trash, restore, dan empty trash.
 - Kuota per akun ditegakkan di Agent menggunakan nilai yang dikirim gateway.
 - Izin upload, modify, delete, dan share diteruskan gateway pada setiap request.
-- File yang dihapus dipindahkan ke `.trash`; ukuran trash tetap dihitung dalam kuota sampai dikosongkan.
+- File/folder yang dihapus dipindahkan ke `.trash`; Trash dapat ditampilkan dan item dapat dipulihkan ke lokasi asal. Ukuran trash tetap dihitung dalam kuota sampai dikosongkan.
 - Data akun yang diarsipkan dipindahkan ke `.ait/archive` dan tidak dihapus otomatis.
 - Pemeriksaan path untuk mencegah path traversal dan akses keluar dari folder akun.
 - Health endpoint `/health` untuk monitoring koneksi.
