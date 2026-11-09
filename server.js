@@ -334,6 +334,7 @@ app.post('/upload', (req, res, next) => {
       const ext = path.extname(name), base = path.basename(name, ext);
       let i = 1;
       while (fs.existsSync(target) || fs.existsSync(target + '.part')) target = path.join(targetDir, `${base} (${i++})${ext}`);
+      fs.mkdirSync(targetDir, { recursive: true });
       const tmp = target + '.part';
       const ws = fs.createWriteStream(tmp);
       let written = 0, over = false, limited = false;
