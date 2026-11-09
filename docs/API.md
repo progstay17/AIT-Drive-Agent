@@ -126,11 +126,11 @@ Pencarian nama file/folder secara rekursif di root akun. Maksimal 200 hasil:
 
 ### `GET /download?path=<relative-path>[&inline=1]`
 
-Mengirim file sebagai stream. Default `Content-Disposition: attachment`; `inline=1` meminta browser menampilkan inline. `X-Content-Type-Options: nosniff` dipasang. Gateway sebaiknya melakukan streaming response, bukan memuat seluruh file ke memori.
+Mengirim file sebagai stream. Default `Content-Disposition: attachment`; `inline=1` meminta browser menampilkan inline. Jika `path` menunjuk folder, Agent membuat arsip ZIP rekursif bernama `<folder>.zip` (Windows memakai PowerShell `Compress-Archive`; Linux memerlukan executable `zip`). `X-Content-Type-Options: nosniff` dipasang. Gateway sebaiknya melakukan streaming response, bukan memuat seluruh file ke memori.
 
 ### `POST /upload?path=<relative-folder>`
 
-`multipart/form-data`, satu atau lebih field file. Izin `upload` wajib. Maksimum ukuran per file saat ini 50 GiB. Nama file dibersihkan menjadi basename; bila nama sudah ada, Agent membuat nama `(1)`, `(2)`, dan seterusnya.
+`multipart/form-data`, satu atau lebih field file. Izin `upload` wajib. Maksimum ukuran per file saat ini 50 GiB. Field file dapat memakai nama relatif seperti `Folder/Subfolder/photo.jpg` (misalnya dari `webkitRelativePath`) untuk mempertahankan struktur folder. Setiap segmen path divalidasi; path absolut, traversal, dan `.trash` ditolak. Bila nama tujuan sudah ada, Agent membuat nama `(1)`, `(2)`, dan seterusnya.
 
 Respons:
 
@@ -175,6 +175,37 @@ Izin `delete` wajib.
 ```
 
 Memindahkan item ke `.trash` akun, bukan menghapus permanen. `used` tetap menghitung item tersebut.
+
+### `GET /trash`
+
+Menampilkan isi Trash akun, termasuk file dan folder. Respons:
+
+```json
+{
+  "items": [
+    {
+      "id": "2026-11-09T12-00-00-000Z__abc123__report.pdf",
+      "name": "report.pdf",
+      "originalPath": "Documents/report.pdf",
+      "deletedAt": "2026-11-09T12:00:00.000Z",
+      "type": "file",
+      "size": 2048
+    }
+  ]
+}
+```
+
+ID adalah identifier opaque yang harus dikirim kembali saat restore. Metadata untuk item yang baru dihapus menyimpan path asal dan waktu penghapusan. Item Trash lama tetap ditampilkan dengan path terbaik yang bisa diperkirakan dari nama legacy; path asal historis mungkin tidak tersedia.
+
+### `POST /trash/restore`
+
+Izin `delete` wajib. Memulihkan item ke path asal dan membuat parent folder jika belum ada:
+
+```json
+{ "id": "2026-11-09T12-00-00-000Z__abc123__report.pdf" }
+```
+
+Respons `{ "ok": true, "path": "Documents/report.pdf" }`. Jika lokasi asal sudah berisi item dengan nama yang sama, Agent mengembalikan `409` dan tidak menimpa file yang ada.
 
 ### `POST /trash/empty`
 
